@@ -1,0 +1,5 @@
+requests
+python-dotenv
+sentence-transformers
+psycopg2-binary
+pgvector

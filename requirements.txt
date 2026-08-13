@@ -1,0 +1,9 @@
+requests
+python-dotenv
+sentence-transformers
+psycopg2-binary
+pgvector
+mistralai
+fastapi
+uvicorn
+streamlit

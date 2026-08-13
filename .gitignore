@@ -1,0 +1,30 @@
+# Secrets et identifiants — jamais versionnés
+.env
+airflow/.env
+identifiants_*.json
+ZZZ_old
+frederic_tellier_cv.md
+
+# Données France Travail — l'article 3 de la licence de réutilisation
+# interdit de mettre la base de données à disposition de tiers.
+# Seul le code est public, jamais les offres brutes extraites.
+data_raw/
+
+# Cache local du scoring LLM — pas du code, pas à versionner
+cache_scoring.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Airflow — logs d'exécution, config générée, plugins locaux
+airflow/logs/
+airflow/plugins/
+airflow/config/airflow.cfg
+
+# Divers OS / éditeurs
+.DS_Store
+*.swp
