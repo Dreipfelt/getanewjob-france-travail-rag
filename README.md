@@ -96,26 +96,26 @@ MISTRAL_API_KEY=...
 
 ```bash
 # 1. Extraire les offres depuis l'API France Travail
-python ingest_offres.py
+python ingestion/ingest_offres.py
 
 # 2. Synchroniser la base (upsert + suppression des offres disparues)
-python sync_db.py
+python ingestion/sync_db.py
 
 # 3. Recherche sémantique simple
-python search.py mon_profil.md --type-contrat CDI --experience D
+python search/search.py mon_profil.md --type-contrat CDI --experience D
 
 # 4. Scoring motivé par LLM sur le top-N
-python score_offres.py mon_profil.md --type-contrat CDI --experience D --top-n 10
+python search/score_offres.py mon_profil.md --type-contrat CDI --experience D --top-n 10
 ```
 
 ### Via l'interface web
 
 ```bash
-# Terminal 1 — backend
-uvicorn api:app --reload --port 8000
+# Terminal 1 — backend (depuis le dossier api/)
+cd api && uvicorn api:app --reload --port 8000
 
-# Terminal 2 — interface
-streamlit run app.py
+# Terminal 2 — interface (depuis le dossier app/)
+cd app && streamlit run app.py
 ```
 
 Ouvrir `http://localhost:8501`, coller un profil, filtrer, rechercher, puis lancer le scoring motivé à la demande sur les résultats affichés.
