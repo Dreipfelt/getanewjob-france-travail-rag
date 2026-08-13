@@ -1,0 +1,20 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: getanewjob-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: getanewjob
+      POSTGRES_PASSWORD: changeme_local_dev   # usage local uniquement, cf. note ci-dessous
+      POSTGRES_DB: getanewjob
+    ports:
+      - "5432:5432"
+    volumes:
+      # Persistance des données entre redémarrages du conteneur
+      - pgdata:/var/lib/postgresql/data
+      # Exécuté automatiquement au premier démarrage (base vide uniquement) :
+      # crée l'extension vector + toutes les tables du schema.sql
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+
+volumes:
+  pgdata:

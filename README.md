@@ -92,6 +92,14 @@ MISTRAL_API_KEY=...
 
 ## Usage
 
+### Lancement rapide
+
+```bash
+./start.sh
+```
+
+Démarre PostgreSQL/pgvector, Airflow, l'API FastAPI et Streamlit en une seule commande. Testé sous Linux avec GNOME Terminal (ouvre l'API et Streamlit dans de nouveaux onglets) ; sur un autre environnement, le script affiche les commandes à lancer manuellement en repli.
+
 ### En CLI (test manuel)
 
 ```bash
