@@ -26,31 +26,31 @@ Ce projet réutilise des données soumises à une licence spécifique. Points de
 France Travail API (OAuth2 client_credentials)
         │
         ▼
-  ingest_offres.py  ──►  data_raw/offres_latest.json  (extraction multi-mots-clés, dédoublonnée)
+  ingestion/ingest_offres.py  ──►  data_raw/offres_latest.json  (extraction multi-mots-clés, dédoublonnée)
         │
         ▼
-  sync_db.py         ──►  PostgreSQL + pgvector    (upsert incrémental, suppression des offres
-        │                                           disparues — conformité licence France Travail)
+  ingestion/sync_db.py         ──►  PostgreSQL + pgvector    (upsert incrémental, suppression des offres
+        │                                                    disparues — conformité licence France Travail)
         ▼
   ┌─────────────────────────────────────────────────────────────┐
-  │  api.py (FastAPI)                                             │
+  │  api/api.py (FastAPI)                                          │
   │    POST /search  → recherche sémantique + filtres, gratuite   │
   │    POST /score   → scoring LLM motivé (Mistral), avec cache   │
   │    GET  /departements → départements disponibles en base      │
   └─────────────────────────────────────────────────────────────┘
         │
         ▼
-  app.py (Streamlit)  ──►  interface utilisateur (profil, filtres, résultats, scoring à la demande)
+  app/app.py (Streamlit)  ──►  interface utilisateur (profil, filtres, résultats, scoring à la demande)
 
 
   Orchestration (Airflow, DAG quotidien) :
-  ingest_offres.py  >>  sync_db.py
+  ingestion/ingest_offres.py  >>  ingestion/sync_db.py
   (exécuté dans un conteneur Airflow personnalisé, connecté au réseau
    Docker de la base pgvector)
 ```
 
 Deux modes d'usage coexistent :
-- **CLI direct** (`ingest_offres.py`, `load_embeddings.py`/`sync_db.py`, `search.py`, `score_offres.py`) — pour du test manuel, avec `.env` pointant vers `PG_HOST=localhost`.
+- **CLI direct** (`ingestion/ingest_offres.py`, `ingestion/sync_db.py`, `search/search.py`, `search/score_offres.py`) — pour du test manuel, avec `.env` pointant vers `PG_HOST=localhost`.
 - **Orchestré** (Airflow, `airflow/dags/getanewjob_ingestion_dag.py`) — ingestion quotidienne automatique, avec `PG_HOST` injecté dynamiquement (`getanewjob-postgres`) indépendamment du `.env`.
 
 ## Stack
