@@ -1,8 +1,6 @@
-# GetANewJob — RAG multilingue pour offres d'emploi data
-
-Système de recherche sémantique et de scoring qui compare un profil (CV) à un corpus d'offres d'emploi data, en s'appuyant sur l'API officielle France Travail.
-
-Projet de démonstration technique (embeddings, vectorisation, retrieval, scoring LLM) construit pour combler une lacune récurrente identifiée dans plusieurs candidatures.
+# GetANewJob — Système RAG multilingue sur offres d'emploi (2026)
+Ingestion quotidienne via l'API officielle France Travail (OAuth2, pagination, dédoublonnage), synchronisation incrémentale PostgreSQL/pgvector avec suppression des offres disparues (conformité licence). Recherche sémantique multilingue FR/NL/DE (paraphrase-multilingual-mpnet-base-v2, 768 dim, index HNSW cosinus), scoring LLM motivé (Mistral) avec cache par hash pour maîtriser les coûts. Orchestration Airflow, API FastAPI, interface Streamlit, Docker Compose.
+Stack : Python · sentence-transformers · PostgreSQL · pgvector · FastAPI · Streamlit · Apache Airflow · Mistral API · Docker Compose
 
 ## Source des données
 

@@ -1,6 +1,6 @@
 """
 Scoring LLM : pour chaque offre du top-N (issu de la recherche sémantique),
-demande à Claude d'évaluer la pertinence par rapport au profil, avec un
+demande à Mistral d'évaluer la pertinence par rapport au profil, avec un
 score et une justification structurée.
 
 Usage :
@@ -129,10 +129,12 @@ def get_top_n_offres(embedding_profil, args) -> list:
     return [dict(zip(colonnes, row)) for row in resultats]
 
 
-def score_offre(client: Mistral, profil_texte: str, offre: dict) -> dict:
+def score_offre(client: Mistral, profil_texte: str, offre: dict,
+                max_retries: int = 4) -> dict:
     """
-    Appelle Claude pour scorer une offre par rapport au profil.
-    Retourne un dict structuré : score, points_forts, points_faibles, red_flags.
+    Appelle Mistral pour scorer une offre par rapport au profil.
+    Retry avec backoff exponentiel + jitter en cas de rate limit (429)
+    ou d'erreur serveur transitoire (5xx).
     """
     description_tronquee = (offre["description"] or "")[:MAX_DESCRIPTION_LEN]
 
@@ -159,29 +161,50 @@ Réponds UNIQUEMENT avec un objet JSON (rien d'autre, pas de texte avant/après)
 
 Le score doit refléter l'adéquation réelle entre les compétences/expérience du candidat et les exigences de l'offre. Sois honnête et nuancé, pas complaisant."""
 
-    response = client.chat.complete(
-        model=MISTRAL_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=1500,
-    )
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.complete(
+                model=MISTRAL_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1500,
+            )
 
-    texte_reponse = response.choices[0].message.content.strip()
+            texte_reponse = response.choices[0].message.content.strip()
 
-    # Mistral enveloppe parfois sa réponse dans des balises markdown
-    # ```json ... ``` malgré la consigne de répondre en JSON pur.
-    # On les retire avant de parser.
-    if texte_reponse.startswith("```"):
-        texte_reponse = texte_reponse.strip("`")
-        if texte_reponse.startswith("json"):
-            texte_reponse = texte_reponse[4:]
-        texte_reponse = texte_reponse.strip()
+            # Mistral enveloppe parfois sa réponse dans des balises markdown
+            if texte_reponse.startswith("```"):
+                texte_reponse = texte_reponse.strip("`")
+                if texte_reponse.startswith("json"):
+                    texte_reponse = texte_reponse[4:]
+                texte_reponse = texte_reponse.strip()
 
-    try:
-        return json.loads(texte_reponse)
-    except json.JSONDecodeError:
-        print(f"  AVERTISSEMENT : réponse non-JSON pour l'offre {offre['id']}, ignorée.")
-        print(f"  Réponse brute : {texte_reponse[:200]}")
-        return None
+            try:
+                return json.loads(texte_reponse)
+            except json.JSONDecodeError:
+                print(f"  AVERTISSEMENT : réponse non-JSON pour {offre['id']}")
+                print(f"  Réponse brute : {texte_reponse[:200]}")
+                return None
+
+        except Exception as e:
+            # Détection du rate limit sur le message d'erreur (robuste
+            # quelle que soit la version de mistralai)
+            is_rate_limit = "429" in str(e) or "rate" in str(e).lower()
+            is_server_error = any(c in str(e) for c in ["500", "502", "503", "504"])
+
+            if (is_rate_limit or is_server_error) and attempt < max_retries - 1:
+                # Backoff exponentiel : 2^attempt secondes + jitter aléatoire
+                # 0.5s → 1s → 2s → 4s (+ 0-1s aléatoire à chaque fois)
+                wait = (2 ** attempt) * 0.5 + random.uniform(0, 1)
+                print(f"  Rate limit / erreur serveur sur {offre['id']} "
+                      f"(tentative {attempt + 1}/{max_retries}). "
+                      f"Attente {wait:.1f}s...")
+                time.sleep(wait)
+            else:
+                # Erreur non retriable (auth, 404, etc.) ou max retries atteint
+                print(f"  ERREUR non retriable sur {offre['id']} : {e}")
+                return None
+
+    return None  # max_retries épuisés sans succès
 
 
 def main():
