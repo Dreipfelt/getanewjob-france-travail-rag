@@ -28,3 +28,4 @@ airflow/config/airflow.cfg
 # Divers OS / éditeurs
 .DS_Store
 *.swp
+*.save
