@@ -1,5 +1,6 @@
 """
-Scoring LLM : pour chaque offre du top-N (issu de la recherche sémantique),
+Scoring LLM : pour chaque offre du top-N (issu de la recherche hybride +
+reclassement par cross-encoder, voir hybrid_search.py et rerank.py),
 demande à Mistral d'évaluer la pertinence par rapport au profil, avec un
 score et une justification structurée.
 
@@ -34,7 +35,8 @@ from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 from mistralai.client import Mistral
 
-from hybrid_search import EMBEDDING_MODEL_NAME, PG_CONFIG, hybrid_search
+from hybrid_search import EMBEDDING_MODEL_NAME, PG_CONFIG
+from rerank import search_and_rerank
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
@@ -177,8 +179,9 @@ def main():
         print("ERREUR : PG_PASSWORD manquant dans .env")
         sys.exit(1)
 
-    print(f"Récupération du top-{args.top_n} par recherche hybride (vectorielle + mots-clés)...")
-    offres = hybrid_search(
+    print(f"Récupération du top-{args.top_n} par recherche hybride + reclassement "
+          "(le modèle de reranking peut être téléchargé au premier lancement)...")
+    offres = search_and_rerank(
         texte_profil,
         embedding_profil,
         type_contrat=args.type_contrat,

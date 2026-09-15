@@ -1,6 +1,7 @@
 """
 API FastAPI exposant :
-- POST /search : recherche sémantique (avec filtres optionnels), gratuite
+- POST /search : recherche hybride (vectorielle + mots-clés) + reclassement
+  par cross-encoder (avec filtres optionnels), gratuite
 - POST /score  : scoring LLM motivé sur un ensemble d'offres (payant, appelé
   à la demande uniquement)
 
@@ -33,7 +34,8 @@ load_dotenv(PROJECT_ROOT / ".env")
 # path pour réutiliser la même logique de recherche hybride que les CLI,
 # plutôt que de la dupliquer une troisième fois.
 sys.path.insert(0, str(PROJECT_ROOT / "search"))
-from hybrid_search import EMBEDDING_MODEL_NAME, PG_CONFIG, get_connection, hybrid_search  # noqa: E402
+from hybrid_search import EMBEDDING_MODEL_NAME, PG_CONFIG, get_connection  # noqa: E402
+from rerank import search_and_rerank  # noqa: E402
 
 MISTRAL_MODEL = "mistral-small-latest"
 CACHE_PATH = PROJECT_ROOT / "cache_scoring.json"
@@ -67,6 +69,7 @@ class OffreResult(BaseModel):
     score_rrf: float
     rang_vectoriel: Optional[int]
     rang_motscles: Optional[int]
+    score_rerank: float
 
 
 class SearchResponse(BaseModel):
@@ -168,11 +171,11 @@ Le score doit refléter l'adéquation réelle entre les compétences/expérience
 
 @app.post("/search", response_model=SearchResponse)
 def search(req: SearchRequest):
-    """Recherche hybride (vectorielle + mots-clés) gratuite, sans appel LLM."""
+    """Recherche hybride (vectorielle + mots-clés) + reclassement, gratuite, sans appel LLM."""
     if not PG_CONFIG["password"]:
         raise HTTPException(status_code=500, detail="PG_PASSWORD manquant dans .env")
     embedding_profil = embedding_model.encode(req.profil)
-    rows = hybrid_search(
+    rows = search_and_rerank(
         req.profil, embedding_profil,
         types_contrat=req.types_contrat, departements=req.departements,
         experience=req.experience, limit=req.limit,
@@ -190,7 +193,7 @@ def score(req: ScoreRequest):
         raise HTTPException(status_code=500, detail="PG_PASSWORD manquant dans .env")
 
     embedding_profil = embedding_model.encode(req.profil)
-    offres = hybrid_search(
+    offres = search_and_rerank(
         req.profil, embedding_profil,
         types_contrat=req.types_contrat, departements=req.departements,
         experience=req.experience, limit=req.top_n, with_description=True,

@@ -166,6 +166,11 @@ def hybrid_search(profil_texte, embedding_profil, *, types_contrat=None,
     Si la branche mots-clés échoue (ex : tsquery mal formée sur une entrée
     inhabituelle), la recherche se dégrade silencieusement en vectoriel pur
     plutôt que de faire échouer toute la requête.
+
+    Chaque résultat inclut toujours texte_embedding (nécessaire au
+    reclassement par cross-encoder, voir rerank.py) même si
+    with_description=False ; les modèles de réponse de l'API l'excluent du
+    JSON renvoyé au client.
     """
     candidate_k = candidate_k or max(limit * 5, 50)
     conditions, params = build_conditions(
@@ -192,7 +197,7 @@ def hybrid_search(profil_texte, embedding_profil, *, types_contrat=None,
         if not top_ids:
             return []
 
-        colonnes = "id, intitule, entreprise_nom, lieu_libelle, type_contrat_libelle, experience_libelle"
+        colonnes = "id, intitule, entreprise_nom, lieu_libelle, type_contrat_libelle, experience_libelle, texte_embedding"
         if with_description:
             colonnes += ", description"
 

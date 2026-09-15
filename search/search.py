@@ -1,8 +1,10 @@
 """
-Recherche hybride : compare un profil (fichier markdown) aux offres
-stockées dans PostgreSQL/pgvector, en combinant similarité vectorielle et
-recherche par mots-clés (fusion RRF, voir hybrid_search.py), avec filtres
-optionnels sur type de contrat, localisation et expérience requise.
+Recherche hybride + reclassement : compare un profil (fichier markdown) aux
+offres stockées dans PostgreSQL/pgvector, en combinant similarité
+vectorielle et recherche par mots-clés (fusion RRF, voir hybrid_search.py),
+puis reclasse le pool obtenu avec un cross-encoder local (voir rerank.py),
+avec filtres optionnels sur type de contrat, localisation et expérience
+requise.
 
 Usage :
     python search.py chemin/vers/profil.md
@@ -26,7 +28,8 @@ import sys
 import argparse
 from sentence_transformers import SentenceTransformer
 
-from hybrid_search import EMBEDDING_MODEL_NAME, PG_CONFIG, hybrid_search
+from hybrid_search import EMBEDDING_MODEL_NAME, PG_CONFIG
+from rerank import search_and_rerank
 
 
 def parse_args():
@@ -66,8 +69,9 @@ def main():
         print("ERREUR : PG_PASSWORD manquant dans .env")
         sys.exit(1)
 
-    print("Recherche hybride (vectorielle + mots-clés) en cours...")
-    resultats = hybrid_search(
+    print("Recherche hybride (vectorielle + mots-clés) + reclassement en cours "
+          "(le modèle de reranking peut être téléchargé au premier lancement)...")
+    resultats = search_and_rerank(
         texte_profil,
         embedding_profil,
         type_contrat=args.type_contrat,
@@ -82,7 +86,7 @@ def main():
 
     print(f"\nTop {len(resultats)} offres les plus proches du profil :\n")
     for r in resultats:
-        print(f"[RRF {r['score_rrf']:.4f} | distance {r['distance']:.4f} | "
+        print(f"[rerank {r['score_rerank']:.4f} | RRF {r['score_rrf']:.4f} | distance {r['distance']:.4f} | "
               f"rang vecteur {r['rang_vectoriel'] or '-'} | rang mots-clés {r['rang_motscles'] or '-'}] "
               f"{r['intitule']}")
         print(f"    {r['entreprise_nom'] or 'N/A'} | {r['lieu_libelle'] or 'N/A'} | "
