@@ -17,8 +17,8 @@ st.set_page_config(page_title="GetANewJob", page_icon="🔍", layout="wide")
 
 st.title("GetANewJob")
 st.caption(
-    "Recherche sémantique et scoring motivé d'offres d'emploi data, "
-    "à partir de l'API France Travail."
+    "Recherche hybride (sémantique + mots-clés) et scoring motivé d'offres "
+    "d'emploi data, à partir de l'API France Travail."
 )
 st.caption(
     "Source des données : France Travail (francetravail.fr). "
@@ -126,7 +126,12 @@ if "resultats_recherche" in st.session_state:
                     f"{r.get('type_contrat_libelle') or 'Contrat non précisé'} · "
                     f"{r.get('experience_libelle') or 'Expérience non précisée'}"
                 )
-                st.caption(f"Similarité : {1 - r['distance']:.2%} · id: {r['id']}")
+                st.caption(
+                    f"Similarité : {1 - r['distance']:.2%} · "
+                    f"score hybride (RRF) : {r['score_rrf']:.4f} "
+                    f"(rang vecteur {r['rang_vectoriel'] or '-'}, rang mots-clés {r['rang_motscles'] or '-'}) · "
+                    f"id: {r['id']}"
+                )
 
         st.divider()
 

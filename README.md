@@ -1,5 +1,5 @@
 # GetANewJob — Système RAG multilingue sur offres d'emploi (2026)
-Ingestion quotidienne via l'API officielle France Travail (OAuth2, pagination, dédoublonnage), synchronisation incrémentale PostgreSQL/pgvector avec suppression des offres disparues (conformité licence). Recherche sémantique multilingue FR/NL/DE (paraphrase-multilingual-mpnet-base-v2, 768 dim, index HNSW cosinus), scoring LLM motivé (Mistral) avec cache par hash pour maîtriser les coûts. Orchestration Airflow, API FastAPI, interface Streamlit, Docker Compose.
+Ingestion quotidienne via l'API officielle France Travail (OAuth2, pagination, dédoublonnage), synchronisation incrémentale PostgreSQL/pgvector avec suppression des offres disparues (conformité licence). Recherche hybride multilingue FR/NL/DE : similarité vectorielle (paraphrase-multilingual-mpnet-base-v2, 768 dim, index HNSW cosinus) combinée à une recherche par mots-clés (PostgreSQL full-text search), fusionnées par Reciprocal Rank Fusion. Scoring LLM motivé (Mistral) avec cache par hash pour maîtriser les coûts. Orchestration Airflow, API FastAPI, interface Streamlit, Docker Compose.
 Stack : Python · sentence-transformers · PostgreSQL · pgvector · FastAPI · Streamlit · Apache Airflow · Mistral API · Docker Compose
 
 ## Source des données
@@ -32,7 +32,7 @@ France Travail API (OAuth2 client_credentials)
         ▼
   ┌─────────────────────────────────────────────────────────────┐
   │  api/api.py (FastAPI)                                          │
-  │    POST /search  → recherche sémantique + filtres, gratuite   │
+  │    POST /search  → recherche hybride (vecteur + mots-clés) + filtres, gratuite   │
   │    POST /score   → scoring LLM motivé (Mistral), avec cache   │
   │    GET  /departements → départements disponibles en base      │
   └─────────────────────────────────────────────────────────────┘
@@ -88,6 +88,12 @@ PG_PASSWORD=...
 MISTRAL_API_KEY=...
 ```
 
+Si la base PostgreSQL existe déjà (volume Docker créé avant l'ajout de la recherche hybride), appliquer la migration qui ajoute la colonne full-text et son index :
+```bash
+docker exec -i getanewjob-postgres psql -U getanewjob -d getanewjob < sql/002_ajout_recherche_hybride.sql
+```
+Une base recréée à partir d'un volume neuf n'en a pas besoin : la colonne est déjà définie dans `sql/schema.sql`.
+
 ## Usage
 
 ### Lancement rapide
@@ -107,7 +113,7 @@ python ingestion/ingest_offres.py
 # 2. Synchroniser la base (upsert + suppression des offres disparues)
 python ingestion/sync_db.py
 
-# 3. Recherche sémantique simple
+# 3. Recherche hybride (vecteur + mots-clés)
 python search/search.py mon_profil.md --type-contrat CDI --experience D
 
 # 4. Scoring motivé par LLM sur le top-N
@@ -140,7 +146,7 @@ Interface Airflow sur `http://localhost:8090` (ou le port configuré si 8080 est
 **Fonctionnel et testé de bout en bout :**
 - Authentification OAuth2 et ingestion multi-mots-clés avec pagination et dédoublonnage
 - Stockage vectoriel PostgreSQL/pgvector, avec synchronisation incrémentale (upsert + suppression des offres disparues, conforme à la licence de réutilisation)
-- Recherche sémantique avec filtres structurés multi-sélection (contrat, département, expérience)
+- Recherche hybride (similarité vectorielle + mots-clés, fusion RRF) avec filtres structurés multi-sélection (contrat, département, expérience)
 - Scoring LLM motivé (score + points forts/faibles + red flags), avec cache pour maîtriser les coûts
 - Backend FastAPI et interface Streamlit, scoring déclenché à la demande pour ne pas exposer de coût caché
 - Orchestration Airflow (DAG quotidien ingestion → synchronisation), avec image Docker personnalisée intégrant les dépendances du projet

@@ -15,6 +15,7 @@ Réutilise la même config (.env) que les scripts CLI existants.
 """
 
 import os
+import sys
 import json
 import hashlib
 from pathlib import Path
@@ -23,22 +24,17 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
-import psycopg2
-from pgvector.psycopg2 import register_vector
 from mistralai.client import Mistral
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-PG_CONFIG = {
-    "host": os.getenv("PG_HOST", "localhost"),
-    "port": os.getenv("PG_PORT", "5432"),
-    "dbname": os.getenv("PG_DB", "getanewjob"),
-    "user": os.getenv("PG_USER", "getanewjob"),
-    "password": os.getenv("PG_PASSWORD"),
-}
+# search/ n'est pas packagé (pas de setup.py) : on ajoute son dossier au
+# path pour réutiliser la même logique de recherche hybride que les CLI,
+# plutôt que de la dupliquer une troisième fois.
+sys.path.insert(0, str(PROJECT_ROOT / "search"))
+from hybrid_search import EMBEDDING_MODEL_NAME, PG_CONFIG, get_connection, hybrid_search  # noqa: E402
 
-EMBEDDING_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 MISTRAL_MODEL = "mistral-small-latest"
 CACHE_PATH = PROJECT_ROOT / "cache_scoring.json"
 MAX_DESCRIPTION_LEN = 1500
@@ -68,6 +64,9 @@ class OffreResult(BaseModel):
     type_contrat_libelle: Optional[str]
     experience_libelle: Optional[str]
     distance: float
+    score_rrf: float
+    rang_vectoriel: Optional[int]
+    rang_motscles: Optional[int]
 
 
 class SearchResponse(BaseModel):
@@ -102,55 +101,10 @@ class ScoreResponse(BaseModel):
 # --- Fonctions internes ---
 
 def get_db_connection():
-    if not PG_CONFIG["password"]:
-        raise HTTPException(status_code=500, detail="PG_PASSWORD manquant dans .env")
-    conn = psycopg2.connect(**PG_CONFIG)
-    register_vector(conn)
-    return conn
-
-
-def build_where_clause(types_contrat, departements, experience):
-    conditions = []
-    params = []
-    if types_contrat:
-        conditions.append("type_contrat = ANY(%s)")
-        params.append(types_contrat)
-    if departements:
-        # lieu_code_postal LIKE 'XX%' pour chaque département sélectionné,
-        # combinés par OR
-        or_conditions = " OR ".join(["lieu_code_postal LIKE %s"] * len(departements))
-        conditions.append(f"({or_conditions})")
-        params.extend([f"{dep}%" for dep in departements])
-    if experience:
-        conditions.append("experience_exige = %s")
-        params.append(experience)
-    where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-    return where_clause, params
-
-
-def query_offres(embedding_profil, types_contrat, departements, experience, limit, with_description=False):
-    where_clause, params = build_where_clause(types_contrat, departements, experience)
-
-    colonnes = "id, intitule, entreprise_nom, lieu_libelle, type_contrat_libelle, experience_libelle"
-    if with_description:
-        colonnes += ", description"
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    query = f"""
-        SELECT {colonnes}, embedding <=> %s AS distance
-        FROM offres
-        {where_clause}
-        ORDER BY distance ASC
-        LIMIT %s
-    """
-    cur.execute(query, [embedding_profil] + params + [limit])
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-
-    noms_colonnes = colonnes.split(", ") + ["distance"]
-    return [dict(zip(noms_colonnes, row)) for row in rows]
+    try:
+        return get_connection()
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def load_cache() -> dict:
@@ -214,10 +168,14 @@ Le score doit refléter l'adéquation réelle entre les compétences/expérience
 
 @app.post("/search", response_model=SearchResponse)
 def search(req: SearchRequest):
-    """Recherche sémantique gratuite, sans appel LLM."""
+    """Recherche hybride (vectorielle + mots-clés) gratuite, sans appel LLM."""
+    if not PG_CONFIG["password"]:
+        raise HTTPException(status_code=500, detail="PG_PASSWORD manquant dans .env")
     embedding_profil = embedding_model.encode(req.profil)
-    rows = query_offres(
-        embedding_profil, req.types_contrat, req.departements, req.experience, req.limit
+    rows = hybrid_search(
+        req.profil, embedding_profil,
+        types_contrat=req.types_contrat, departements=req.departements,
+        experience=req.experience, limit=req.limit,
     )
     return {"resultats": rows}
 
@@ -228,11 +186,14 @@ def score(req: ScoreRequest):
     api_key = os.getenv("MISTRAL_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="MISTRAL_API_KEY manquant dans .env")
+    if not PG_CONFIG["password"]:
+        raise HTTPException(status_code=500, detail="PG_PASSWORD manquant dans .env")
 
     embedding_profil = embedding_model.encode(req.profil)
-    offres = query_offres(
-        embedding_profil, req.types_contrat, req.departements, req.experience,
-        req.top_n, with_description=True,
+    offres = hybrid_search(
+        req.profil, embedding_profil,
+        types_contrat=req.types_contrat, departements=req.departements,
+        experience=req.experience, limit=req.top_n, with_description=True,
     )
 
     if not offres:

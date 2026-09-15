@@ -25,27 +25,21 @@ Maîtrise des coûts :
 import os
 import sys
 import json
+import time
+import random
 import argparse
 import hashlib
 from pathlib import Path
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
-import psycopg2
-from pgvector.psycopg2 import register_vector
 from mistralai.client import Mistral
+
+from hybrid_search import EMBEDDING_MODEL_NAME, PG_CONFIG, hybrid_search
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-PG_CONFIG = {
-    "host": os.getenv("PG_HOST", "localhost"),
-    "port": os.getenv("PG_PORT", "5432"),
-    "dbname": os.getenv("PG_DB", "getanewjob"),
-    "user": os.getenv("PG_USER", "getanewjob"),
-    "password": os.getenv("PG_PASSWORD"),
-}
-
-MODEL_NAME = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+MODEL_NAME = EMBEDDING_MODEL_NAME
 MISTRAL_MODEL = "mistral-small-latest"
 CACHE_PATH = PROJECT_ROOT / "cache_scoring.json"
 
@@ -86,47 +80,6 @@ def save_cache(cache: dict):
 
 def cache_key(profil_hash: str, offre_id: str) -> str:
     return f"{profil_hash}:{offre_id}"
-
-
-def get_top_n_offres(embedding_profil, args) -> list:
-    """Reprend la logique de filtrage/tri de search.py."""
-    conditions = []
-    params = []
-
-    if args.type_contrat:
-        conditions.append("type_contrat = %s")
-        params.append(args.type_contrat)
-    if args.code_postal:
-        conditions.append("lieu_code_postal LIKE %s")
-        params.append(f"{args.code_postal}%")
-    if args.experience:
-        conditions.append("experience_exige = %s")
-        params.append(args.experience)
-
-    where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-
-    conn = psycopg2.connect(**PG_CONFIG)
-    register_vector(conn)
-    cur = conn.cursor()
-
-    query = f"""
-        SELECT id, intitule, description, entreprise_nom, lieu_libelle,
-               type_contrat_libelle, experience_libelle,
-               embedding <=> %s AS distance
-        FROM offres
-        {where_clause}
-        ORDER BY distance ASC
-        LIMIT %s
-    """
-    cur.execute(query, [embedding_profil] + params + [args.top_n])
-    resultats = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    colonnes = ["id", "intitule", "description", "entreprise_nom", "lieu_libelle",
-                "type_contrat_libelle", "experience_libelle", "distance"]
-    return [dict(zip(colonnes, row)) for row in resultats]
 
 
 def score_offre(client: Mistral, profil_texte: str, offre: dict,
@@ -224,8 +177,16 @@ def main():
         print("ERREUR : PG_PASSWORD manquant dans .env")
         sys.exit(1)
 
-    print(f"Récupération du top-{args.top_n} par recherche sémantique...")
-    offres = get_top_n_offres(embedding_profil, args)
+    print(f"Récupération du top-{args.top_n} par recherche hybride (vectorielle + mots-clés)...")
+    offres = hybrid_search(
+        texte_profil,
+        embedding_profil,
+        type_contrat=args.type_contrat,
+        code_postal=args.code_postal,
+        experience=args.experience,
+        limit=args.top_n,
+        with_description=True,
+    )
     print(f"{len(offres)} offres à scorer.\n")
 
     if not offres:

@@ -46,6 +46,14 @@ CREATE TABLE offres (
     -- exactement ce qui a été vectorisé.
     texte_embedding       TEXT NOT NULL,
 
+    -- Vecteur plein texte (français), dérivé automatiquement de
+    -- texte_embedding. Alimente la branche "mots-clés" de la recherche
+    -- hybride (vectorielle + full-text, fusionnées par Reciprocal Rank
+    -- Fusion) : capture les correspondances exactes de termes (techno,
+    -- intitulé de poste) que la similarité sémantique seule peut diluer
+    -- quand elle est noyée dans un profil long.
+    texte_embedding_tsv   tsvector GENERATED ALWAYS AS (to_tsvector('french', texte_embedding)) STORED,
+
     -- Le vecteur lui-même
     embedding             vector(768),
 
@@ -62,6 +70,11 @@ CREATE TABLE offres (
 CREATE INDEX idx_offres_embedding_hnsw
     ON offres
     USING hnsw (embedding vector_cosine_ops);
+
+-- Index full-text (GIN) pour la branche mots-clés de la recherche hybride.
+CREATE INDEX idx_offres_texte_fts
+    ON offres
+    USING GIN (texte_embedding_tsv);
 
 -- Index classiques pour le filtrage pré/post-retrieval
 CREATE INDEX idx_offres_type_contrat ON offres (type_contrat);
