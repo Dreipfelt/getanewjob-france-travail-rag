@@ -29,3 +29,5 @@ airflow/config/airflow.cfg
 .DS_Store
 *.swp
 *.save
+ingestion/*.json
+ingestion/csp_details.txt
