@@ -37,3 +37,4 @@ cache_scoring.json
 *.bak
 .env
 __pycache__/
+__pycache__/
