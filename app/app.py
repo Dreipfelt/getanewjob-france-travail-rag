@@ -1,20 +1,20 @@
 """
 Interface Streamlit pour GetANewJob.
-
+ 
 Appelle l'API FastAPI (api.py) en HTTP — nécessite que celle-ci tourne
 en parallèle (uvicorn api:app --reload --port 8000).
-
+ 
 Lancement :
     streamlit run app.py
 """
-
+ 
 import streamlit as st
 import requests
-
+ 
 API_URL = "http://localhost:8000"
-
+ 
 st.set_page_config(page_title="GetANewJob", page_icon="🔍", layout="wide")
-
+ 
 st.title("GetANewJob")
 st.caption(
     "Recherche hybride (sémantique + mots-clés) avec reclassement, et "
@@ -25,7 +25,7 @@ st.caption(
     "Réutilisation soumise à la "
     "[licence de réutilisation](https://francetravail.io/produits-partages/documentation/conditions-dutilisation-api/licence-offres-emploi)."
 )
-
+ 
 # --- Profil ---
 st.subheader("Votre profil")
 profil = st.text_area(
@@ -33,17 +33,17 @@ profil = st.text_area(
     height=200,
     placeholder="Ex : 10 ans d'expérience en Data Engineering, maîtrise de Python, Airflow, PostgreSQL...",
 )
-
+ 
 # --- Filtres ---
 st.subheader("Filtres (optionnels)")
-
+ 
 CONTRAT_LABELS = {
     "CDI": "CDI",
     "CDD": "CDD",
     "MIS": "Intérim",
     "LIB": "Profession libérale",
 }
-
+ 
 @st.cache_data(ttl=3600)
 def get_departements_disponibles():
     try:
@@ -52,16 +52,16 @@ def get_departements_disponibles():
         return resp.json()["departements"]
     except requests.exceptions.RequestException:
         return []
-
+ 
 col1, col2 = st.columns(2)
-
+ 
 with col1:
     st.markdown("**Type de contrat**")
     types_contrat_selectionnes = [
         code for code, label in CONTRAT_LABELS.items()
         if st.checkbox(label, key=f"contrat_{code}")
     ]
-
+ 
 with col2:
     st.markdown("**Département**")
     departements_disponibles = get_departements_disponibles()
@@ -70,7 +70,7 @@ with col2:
         options=departements_disponibles,
         label_visibility="collapsed",
     )
-
+ 
 col3, col4 = st.columns(2)
 with col3:
     experience = st.selectbox(
@@ -79,8 +79,8 @@ with col3:
     )
 with col4:
     limit = st.number_input("Nombre de résultats", min_value=1, max_value=50, value=20)
-
-
+ 
+ 
 def build_payload():
     return {
         "profil": profil,
@@ -88,14 +88,14 @@ def build_payload():
         "departements": departements_selectionnes or None,
         "experience": experience or None,
     }
-
-
+ 
+ 
 # --- Recherche sémantique ---
 if st.button("🔍 Rechercher (gratuit)", type="primary", disabled=not profil.strip()):
     with st.spinner("Recherche en cours..."):
         try:
             payload = {**build_payload(), "limit": limit}
-            resp = requests.post(f"{API_URL}/search", json=payload, timeout=30)
+            resp = requests.post(f"{API_URL}/search", json=payload, timeout=300)
             resp.raise_for_status()
             resultats = resp.json()["resultats"]
             st.session_state["resultats_recherche"] = resultats
@@ -107,16 +107,16 @@ if st.button("🔍 Rechercher (gratuit)", type="primary", disabled=not profil.st
             )
         except requests.exceptions.HTTPError as e:
             st.error(f"Erreur de l'API : {e}")
-
+ 
 # --- Affichage des résultats de recherche ---
 if "resultats_recherche" in st.session_state:
     resultats = st.session_state["resultats_recherche"]
-
+ 
     if not resultats:
         st.info("Aucune offre ne correspond à vos critères.")
     else:
         st.subheader(f"{len(resultats)} offres trouvées")
-
+ 
         for r in resultats:
             with st.container(border=True):
                 st.markdown(f"**{r['intitule']}**")
@@ -126,29 +126,30 @@ if "resultats_recherche" in st.session_state:
                     f"{r.get('type_contrat_libelle') or 'Contrat non précisé'} · "
                     f"{r.get('experience_libelle') or 'Expérience non précisée'}"
                 )
+                score_rerank = r.get('score_rerank') or r.get('score_rrf') or 0.0
                 st.caption(
                     f"Similarité : {1 - r['distance']:.2%} · "
-                    f"score reclassement : {r['score_rerank']:.4f} · "
+                    f"score reclassement : {score_rerank:.4f} · "
                     f"score hybride (RRF) : {r['score_rrf']:.4f} "
-                    f"(rang vecteur {r['rang_vectoriel'] or '-'}, rang mots-clés {r['rang_motscles'] or '-'}) · "
+                    f"(rang vecteur {r.get('rang_vectoriel') or '-'}, rang mots-clés {r.get('rang_motscles') or '-'}) · "
                     f"id: {r['id']}"
                 )
-
+ 
         st.divider()
-
+ 
         # --- Scoring LLM à la demande, uniquement sur ce qui a été trouvé ---
         st.subheader("Scoring motivé")
         st.caption(
             "Analyse plus poussée de chaque offre par rapport à votre profil, "
-            "via un appel à l'API Mistral. Ceci a un coût réel par offre non "
-            "encore analysée (les offres déjà scorées sont servies depuis le cache)."
+            "via un appel à l'API Groq. "
+            "Gratuit, les offres déjà scorées sont servies depuis le cache."
         )
-
+ 
         if st.button("🎯 Lancer le scoring motivé sur ces offres"):
             with st.spinner("Analyse en cours (peut prendre du temps selon le nombre d'offres)..."):
                 try:
-                    payload = {**build_payload(), "top_n": limit}
-                    resp = requests.post(f"{API_URL}/score", json=payload, timeout=180)
+                    payload = {**build_payload(), "top_n": min(limit, 5)}
+                    resp = requests.post(f"{API_URL}/score", json=payload, timeout=300)
                     resp.raise_for_status()
                     data = resp.json()
                     st.session_state["resultats_score"] = data["resultats"]
@@ -160,31 +161,31 @@ if "resultats_recherche" in st.session_state:
                     st.error("Impossible de joindre l'API.")
                 except requests.exceptions.HTTPError as e:
                     st.error(f"Erreur de l'API : {e}")
-
-# --- Affichage des résultats scorés ---
-if "resultats_score" in st.session_state:
-    st.subheader("Résultats triés par score de pertinence")
-
-    for r in st.session_state["resultats_score"]:
-        with st.container(border=True):
-            col_titre, col_score = st.columns([4, 1])
-            with col_titre:
-                st.markdown(f"**{r['intitule']}**")
-                st.caption(f"{r.get('entreprise_nom') or 'N/A'} · {r.get('lieu_libelle') or 'N/A'}")
-            with col_score:
-                st.metric("Score", f"{r['score']}/100")
-
-            if r.get("points_forts"):
-                st.markdown("**Points forts**")
-                for p in r["points_forts"]:
-                    st.markdown(f"- {p}")
-
-            if r.get("points_faibles"):
-                st.markdown("**Points faibles**")
-                for p in r["points_faibles"]:
-                    st.markdown(f"- {p}")
-
-            if r.get("red_flags"):
-                st.markdown("**⚠️ Signaux d'alerte**")
-                for p in r["red_flags"]:
-                    st.markdown(f"- {p}")
+ 
+        # --- Affichage des résultats scorés ---
+        if "resultats_score" in st.session_state:
+            st.subheader("Résultats triés par score de pertinence")
+ 
+            for r in st.session_state["resultats_score"]:
+                with st.container(border=True):
+                    col_titre, col_score = st.columns([4, 1])
+                    with col_titre:
+                        st.markdown(f"**{r['intitule']}**")
+                        st.caption(f"{r.get('entreprise_nom') or 'N/A'} · {r.get('lieu_libelle') or 'N/A'}")
+                    with col_score:
+                        st.metric("Score", f"{r['score']}/100")
+ 
+                    if r.get("points_forts"):
+                        st.markdown("**Points forts**")
+                        for p in r["points_forts"]:
+                            st.markdown(f"- {p}")
+ 
+                    if r.get("points_faibles"):
+                        st.markdown("**Points faibles**")
+                        for p in r["points_faibles"]:
+                            st.markdown(f"- {p}")
+ 
+                    if r.get("red_flags"):
+                        st.markdown("**⚠️ Signaux d'alerte**")
+                        for p in r["red_flags"]:
+                            st.markdown(f"- {p}")

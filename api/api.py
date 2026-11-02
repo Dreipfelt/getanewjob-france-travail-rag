@@ -10,7 +10,7 @@ Lancement :
 
 Prérequis :
     pip install fastapi uvicorn sentence-transformers psycopg2-binary
-    pip install python-dotenv pgvector mistralai
+    pip install python-dotenv pgvector groq
 
 Réutilise la même config (.env) que les scripts CLI existants.
 """
@@ -25,7 +25,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
-from mistralai.client import Mistral
+from groq import Groq
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
@@ -34,10 +34,10 @@ load_dotenv(PROJECT_ROOT / ".env")
 # path pour réutiliser la même logique de recherche hybride que les CLI,
 # plutôt que de la dupliquer une troisième fois.
 sys.path.insert(0, str(PROJECT_ROOT / "search"))
-from hybrid_search import EMBEDDING_MODEL_NAME, PG_CONFIG, get_connection  # noqa: E402
+from hybrid_search import EMBEDDING_MODEL_NAME, PG_CONFIG, get_connection, hybrid_search
 from rerank import search_and_rerank  # noqa: E402
 
-MISTRAL_MODEL = "mistral-small-latest"
+GROQ_MODEL = "openai/gpt-oss-20b"
 CACHE_PATH = PROJECT_ROOT / "cache_scoring.json"
 MAX_DESCRIPTION_LEN = 1500
 
@@ -122,10 +122,12 @@ def save_cache(cache: dict):
         json.dump(cache, f, ensure_ascii=False, indent=2)
 
 
-def score_offre_llm(client: Mistral, profil_texte: str, offre: dict) -> Optional[dict]:
+def score_offre_llm(client: Groq, profil_texte: str, offre: dict) -> Optional[dict]:
     description_tronquee = (offre.get("description") or "")[:MAX_DESCRIPTION_LEN]
 
     prompt = f"""Tu es un assistant de tri de candidatures. Compare le profil ci-dessous à l'offre d'emploi, et évalue leur adéquation.
+
+ATTENTION : Ce candidat a 20 ans d'expérience en revue de presse/veille médiatique/management d'équipe (secteur media), PAS en data science. Sa formation data (Data Scientist, Data Engineer, MLOps) est récente (2024-2026). Ne confonds jamais ses années d'expérience media avec de l'expérience data. Évalue ses compétences data uniquement sur la base de ses projets de formation et certifications RNCP.
 
 PROFIL DU CANDIDAT :
 {profil_texte}
@@ -148,8 +150,8 @@ Réponds UNIQUEMENT avec un objet JSON (rien d'autre, pas de texte avant/après)
 
 Le score doit refléter l'adéquation réelle entre les compétences/expérience du candidat et les exigences de l'offre. Sois honnête et nuancé, pas complaisant."""
 
-    response = client.chat.complete(
-        model=MISTRAL_MODEL,
+    response = client.chat.completions.create(
+        model=GROQ_MODEL,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=1500,
     )
@@ -171,29 +173,33 @@ Le score doit refléter l'adéquation réelle entre les compétences/expérience
 
 @app.post("/search", response_model=SearchResponse)
 def search(req: SearchRequest):
-    """Recherche hybride (vectorielle + mots-clés) + reclassement, gratuite, sans appel LLM."""
+    """Recherche hybride (vectorielle + mots-clés), gratuite, sans reranker ni LLM."""
     if not PG_CONFIG["password"]:
         raise HTTPException(status_code=500, detail="PG_PASSWORD manquant dans .env")
     embedding_profil = embedding_model.encode(req.profil)
-    rows = search_and_rerank(
+    rows = hybrid_search(
         req.profil, embedding_profil,
         types_contrat=req.types_contrat, departements=req.departements,
         experience=req.experience, limit=req.limit,
     )
+    # hybrid_search ne retourne pas score_rerank — on l'ajoute à 0.0 pour
+    # que le modèle Pydantic (OffreResult) soit satisfait
+    for r in rows:
+        r.setdefault("score_rerank", 0.0)
     return {"resultats": rows}
 
 
 @app.post("/score", response_model=ScoreResponse)
 def score(req: ScoreRequest):
     """Scoring LLM motivé sur le top-N. Appelle l'API Mistral (coût réel)."""
-    api_key = os.getenv("MISTRAL_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="MISTRAL_API_KEY manquant dans .env")
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY manquant dans .env")
     if not PG_CONFIG["password"]:
         raise HTTPException(status_code=500, detail="PG_PASSWORD manquant dans .env")
 
     embedding_profil = embedding_model.encode(req.profil)
-    offres = search_and_rerank(
+    offres = hybrid_search(
         req.profil, embedding_profil,
         types_contrat=req.types_contrat, departements=req.departements,
         experience=req.experience, limit=req.top_n, with_description=True,
@@ -203,7 +209,7 @@ def score(req: ScoreRequest):
         return {"resultats": [], "appels_api": 0, "servis_depuis_cache": 0}
 
     profil_hash = hashlib.sha256(req.profil.encode()).hexdigest()[:16]
-    client = Mistral(api_key=api_key)
+    client = Groq(api_key=api_key)
     cache = load_cache()
 
     resultats = []
