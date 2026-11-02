@@ -32,8 +32,8 @@ RERANKER_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
 # top N final. Sur-échantillonner laisse au reranker de quoi arbitrer :
 # une offre bien classée par RRF mais peu pertinente peut être écartée, une
 # offre pertinente mais mal classée par RRF peut remonter.
-POOL_MULTIPLIER = 5
-POOL_MIN = 50
+POOL_MULTIPLIER = 3
+POOL_MIN = 20
 
 _reranker = None
 

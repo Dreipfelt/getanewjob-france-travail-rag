@@ -4,6 +4,7 @@ airflow/.env
 identifiants_*.json
 ZZZ_old
 frederic_tellier_cv.md
+_CV_frederic_tellier.md
 
 # Données France Travail — l'article 3 de la licence de réutilisation
 # interdit de mettre la base de données à disposition de tiers.
@@ -31,3 +32,8 @@ airflow/config/airflow.cfg
 *.save
 ingestion/*.json
 ingestion/csp_details.txt
+_CV_*.md
+cache_scoring.json
+*.bak
+.env
+__pycache__/
